@@ -17,6 +17,7 @@ const (
 
 func main() {
 	http.HandleFunc("/v1/", handleProxy)
+	http.HandleFunc("/rag", handleRAG)
 	fmt.Println("Server is running on 0.0.0.0:8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", nil))
 }
@@ -62,6 +63,43 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	proxy.Transport = &streamTransport{http.DefaultTransport}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func handleRAG(w http.ResponseWriter, r *http.Request) {
+	if !validateAPIKey(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	log.Printf("Received request: %s %s", r.Method, r.URL.Path)
+
+	// Log the request body
+	logRequest(r)
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	req, err := http.NewRequest("POST", "http://localhost:8000/rag", bytes.NewBuffer(body))
+	if err != nil {
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "Failed to call RAG API", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func validateAPIKey(r *http.Request) bool {
